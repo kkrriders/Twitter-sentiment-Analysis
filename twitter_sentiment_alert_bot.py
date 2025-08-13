@@ -6,11 +6,36 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 from dotenv import load_dotenv
 from datetime import datetime
+from typing import List, Dict, Any, Optional, Tuple
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+
+# Environment validation
+def validate_environment() -> None:
+    """Validate that all required environment variables are set"""
+    required_vars = [
+        'TWITTER_BEARER_TOKEN',
+        'KORE_AI_CLIENT_ID', 
+        'KORE_AI_CLIENT_SECRET',
+        'KORE_AI_BOT_ID'
+    ]
+    
+    missing_vars = []
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
+    
+    if missing_vars:
+        print(f"⚠️ Warning: Missing environment variables: {', '.join(missing_vars)}")
+        print("Some features may not work properly.")
+    else:
+        print("✅ All required environment variables are set.")
+
+# Validate environment on startup
+validate_environment()
 
 # === Twitter API Configuration ===
 bearer_token = os.getenv('TWITTER_BEARER_TOKEN')
@@ -36,18 +61,26 @@ if not os.path.isabs(model_path):
 print(f"🔍 Looking for model at: {model_path}")
 
 try:
+    print(f"🔍 Loading tokenizer from: bert-base-uncased")
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    print(f"🔍 Loading model from: {model_path}")
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
     model.eval()
     print(f"✅ Model loaded successfully from: {model_path}")
     print(f"✅ Tokenizer loaded from: bert-base-uncased")
+except FileNotFoundError as e:
+    print(f"❌ Model files not found at {model_path}")
+    print(f"Error: {e}")
+    print("Make sure the model checkpoint directory exists and contains required files.")
+    raise
 except Exception as e:
     print(f"❌ Could not load model from {model_path}")
     print(f"Error: {e}")
-    raise FileNotFoundError(f"Could not load model from {model_path}. Error: {e}")
+    print("Check if the model files are compatible and not corrupted.")
+    raise
 
 # === Predict Sentiment Function ===
-def predict_sentiment(text):
+def predict_sentiment(text: str) -> str:
     inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True)
     with torch.no_grad():
         outputs = model(**inputs)
@@ -57,7 +90,7 @@ def predict_sentiment(text):
         return labels[predicted_class]
 
 # === Send Alert to Kore.ai ===
-def send_alert_to_kore(text, sentiment):
+def send_alert_to_kore(text: str, sentiment: str) -> bool:
     if not kore_ai_webhook_url or kore_ai_webhook_url == 'https://bots.kore.ai/api/v1.1/public/webhook/xxxxx':
         print(f"⚠️ Kore.ai not configured. Would send: {sentiment} for tweet: {text[:50]}...")
         return True
@@ -106,11 +139,11 @@ def send_alert_to_kore(text, sentiment):
 
 # === API Routes ===
 @app.route('/health', methods=['GET'])
-def health_check():
+def health_check() -> Tuple[Dict[str, Any], int]:
     return jsonify({"status": "healthy", "model_loaded": True})
 
 @app.route('/predict', methods=['POST'])
-def predict():
+def predict() -> Tuple[Dict[str, Any], int]:
     try:
         data = request.get_json()
         text = data.get('text', '')
@@ -128,7 +161,7 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/webhook', methods=['POST'])
-def webhook():
+def webhook() -> Tuple[Dict[str, Any], int]:
     """This is your callback URL endpoint for receiving webhook data"""
     try:
         data = request.get_json()
@@ -167,7 +200,7 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/analyze_recent', methods=['POST'])
-def analyze_recent_tweets():
+def analyze_recent_tweets() -> Tuple[Dict[str, Any], int]:
     try:
         data = request.get_json() or {}
         query = data.get('query', 'Bitcoin -is:retweet lang:en')
@@ -203,7 +236,7 @@ def analyze_recent_tweets():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    port = int(os.getenv('PORT', 5000))
     print("🚀 Starting Twitter Sentiment Analysis API...")
-    print(f"📍 Webhook URL will be: http://localhost:5000/webhook")
-    print(f"📍 With ngrok: https://your-ngrok-url.ngrok.io/webhook")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print(f"📍 Webhook URL will be available on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)

@@ -4,13 +4,14 @@ from transformers import BertTokenizer, BertForSequenceClassification, Trainer, 
 from sklearn.model_selection import train_test_split
 from datasets import Dataset
 import numpy as np
+from typing import Dict, Any, List
 
 # Load your dataset
 df = pd.read_csv("C:\\Users\\karti\\Twitter sentiment Analysis\\Bitcoin_tweets_after_june_2022.csv")
 
 # Auto-label if 'label' column not present
 if 'label' not in df.columns:
-    def assign_label(text):
+    def assign_label(text: Any) -> int:
         text = str(text).lower()
         if 'good' in text or 'love' in text or 'great' in text:
             return 1  # Positive
@@ -27,7 +28,7 @@ df = df[['text', 'label']]
 tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 
 # Tokenization with padding and truncation
-def tokenize_function(examples):
+def tokenize_function(examples: Dict[str, List[str]]) -> Dict[str, Any]:
     return tokenizer(
         examples["text"],
         padding="max_length",

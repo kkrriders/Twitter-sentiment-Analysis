@@ -3,6 +3,7 @@ import tweepy
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 from dotenv import load_dotenv
+from typing import List, Optional
 
 # Load environment variables
 load_dotenv()
@@ -32,7 +33,7 @@ except Exception as e:
     exit(1)
 
 # === Predict Sentiment Function ===
-def predict_sentiment(text):
+def predict_sentiment(text: str) -> str:
     inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True)
     with torch.no_grad():
         outputs = model(**inputs)
@@ -42,7 +43,7 @@ def predict_sentiment(text):
         return labels[predicted_class]
 
 # === Fetch Tweets ===
-def get_tweets(query, max_results=5):
+def get_tweets(query: str, max_results: int = 5) -> List[tweepy.Tweet]:
     client = tweepy.Client(bearer_token=bearer_token)
     response = client.search_recent_tweets(query=query, tweet_fields=["text", "created_at"], max_results=max_results)
     return response.data if response.data else []

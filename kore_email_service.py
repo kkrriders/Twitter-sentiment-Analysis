@@ -4,13 +4,14 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 from dotenv import load_dotenv
+from typing import Dict, Any, Tuple
 
 load_dotenv()
 
 app = Flask(__name__)
 
 @app.route('/send-email', methods=['POST'])
-def send_email():
+def send_email() -> Tuple[Dict[str, Any], int]:
     try:
         data = request.get_json()
         
@@ -64,7 +65,7 @@ def send_email():
         }), 500
 
 @app.route('/health', methods=['GET'])
-def health_check():
+def health_check() -> Dict[str, str]:
     return jsonify({"status": "healthy", "service": "email"})
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
+from typing import Dict, Any
 
 # Load tokenizer from base model
 tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
@@ -19,7 +20,7 @@ label_map = {
 }
 
 # Prediction function
-def predict_sentiment(text):
+def predict_sentiment(text: str) -> str:
     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
     with torch.no_grad():
         outputs = model(**inputs)
