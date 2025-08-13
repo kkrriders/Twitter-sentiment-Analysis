@@ -13,16 +13,18 @@ app = Flask(__name__)
 @app.route('/send-email', methods=['POST'])
 def send_email() -> Tuple[Dict[str, Any], int]:
     try:
-        data = request.get_json()
+        data: Optional[Dict[str, Any]] = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON data provided"}), 400
         
         # Extract email parameters
-        to_email = data.get('to_email')
-        subject = data.get('subject', 'Sentiment Analysis Alert')
-        tweet_text = data.get('tweet_text', '')
-        sentiment = data.get('sentiment', '')
+        to_email: Optional[str] = data.get('to_email')
+        subject: str = data.get('subject', 'Sentiment Analysis Alert')
+        tweet_text: str = data.get('tweet_text', '')
+        sentiment: str = data.get('sentiment', '')
         
         # Email content
-        body = f"""
+        body: str = f"""
         Sentiment Analysis Alert
         
         Tweet: {tweet_text}
@@ -33,13 +35,13 @@ def send_email() -> Tuple[Dict[str, Any], int]:
         """
         
         # Email configuration
-        smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-        smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        sender_email = os.getenv('SENDER_EMAIL')
-        sender_password = os.getenv('SENDER_PASSWORD')
+        smtp_server: str = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+        smtp_port: int = int(os.getenv('SMTP_PORT', '587'))
+        sender_email: Optional[str] = os.getenv('SENDER_EMAIL')
+        sender_password: Optional[str] = os.getenv('SENDER_PASSWORD')
         
         # Create message
-        message = MIMEMultipart()
+        message: MIMEMultipart = MIMEMultipart()
         message["From"] = sender_email
         message["To"] = to_email
         message["Subject"] = subject

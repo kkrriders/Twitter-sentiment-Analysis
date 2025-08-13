@@ -9,12 +9,12 @@ from typing import List, Optional
 load_dotenv()
 
 # === Twitter API Configuration ===
-bearer_token = os.getenv('TWITTER_BEARER_TOKEN')
+bearer_token: Optional[str] = os.getenv('TWITTER_BEARER_TOKEN')
 
 # === Load Sentiment Analysis Model ===
-script_dir = os.path.dirname(os.path.abspath(__file__))
-default_model_path = os.path.join(script_dir, 'results', 'checkpoint-174152')
-model_path = os.getenv('MODEL_PATH', default_model_path)
+script_dir: str = os.path.dirname(os.path.abspath(__file__))
+default_model_path: str = os.path.join(script_dir, 'results', 'checkpoint-174152')
+model_path: str = os.getenv('MODEL_PATH', default_model_path)
 
 if not os.path.isabs(model_path):
     model_path = os.path.join(script_dir, model_path)
@@ -22,8 +22,8 @@ if not os.path.isabs(model_path):
 print(f"🔍 Looking for model at: {model_path}")
 
 try:
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    model = AutoModelForSequenceClassification.from_pretrained(model_path)
+    tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    model: AutoModelForSequenceClassification = AutoModelForSequenceClassification.from_pretrained(model_path)
     model.eval()
     print(f"✅ Model loaded successfully from: {model_path}")
     print(f"✅ Tokenizer loaded from: bert-base-uncased")
@@ -44,24 +44,24 @@ def predict_sentiment(text: str) -> str:
 
 # === Fetch Tweets ===
 def get_tweets(query: str, max_results: int = 5) -> List[tweepy.Tweet]:
-    client = tweepy.Client(bearer_token=bearer_token)
+    client: tweepy.Client = tweepy.Client(bearer_token=bearer_token)
     response = client.search_recent_tweets(query=query, tweet_fields=["text", "created_at"], max_results=max_results)
     return response.data if response.data else []
 
 # === Main Driver ===
 if __name__ == "__main__":
-    query = "Bitcoin -is:retweet lang:en"
-    tweets = get_tweets(query=query, max_results=5)
+    query: str = "Bitcoin -is:retweet lang:en"
+    tweets: List[tweepy.Tweet] = get_tweets(query=query, max_results=5)
     
     print(f"\n🎯 Analyzing {len(tweets)} tweets for query: '{query}'\n")
     print("=" * 80)
     
     for i, tweet in enumerate(tweets, 1):
-        text = tweet.text.strip()
+        text: str = tweet.text.strip()
         if not text:
             continue
         
-        sentiment = predict_sentiment(text)
+        sentiment: str = predict_sentiment(text)
         
         print(f"\n📱 Tweet #{i}:")
         print(f"Text: {text}")

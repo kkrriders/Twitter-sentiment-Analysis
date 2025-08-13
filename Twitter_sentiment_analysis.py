@@ -7,7 +7,7 @@ import numpy as np
 from typing import Dict, Any, List
 
 # Load your dataset
-df = pd.read_csv("C:\\Users\\karti\\Twitter sentiment Analysis\\Bitcoin_tweets_after_june_2022.csv")
+df: pd.DataFrame = pd.read_csv("C:\\Users\\karti\\Twitter sentiment Analysis\\Bitcoin_tweets_after_june_2022.csv")
 
 # Auto-label if 'label' column not present
 if 'label' not in df.columns:
@@ -25,7 +25,7 @@ if 'label' not in df.columns:
 df = df[['text', 'label']]
 
 # Tokenizer
-tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+tokenizer: BertTokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 
 # Tokenization with padding and truncation
 def tokenize_function(examples: Dict[str, List[str]]) -> Dict[str, Any]:
@@ -37,10 +37,10 @@ def tokenize_function(examples: Dict[str, List[str]]) -> Dict[str, Any]:
     )
 
 # Convert to HuggingFace Dataset
-dataset = Dataset.from_pandas(df)
+dataset: Dataset = Dataset.from_pandas(df)
 
 # Tokenize
-tokenized_dataset = dataset.map(tokenize_function, batched=True)
+tokenized_dataset: Dataset = dataset.map(tokenize_function, batched=True)
 
 # Set format for PyTorch and rename label column
 tokenized_dataset = tokenized_dataset.rename_column("label", "labels")
@@ -48,14 +48,14 @@ tokenized_dataset.set_format(type="torch", columns=["input_ids", "attention_mask
 
 # Train-test split
 split_dataset = tokenized_dataset.train_test_split(test_size=0.2)
-train_dataset = split_dataset["train"]
-eval_dataset = split_dataset["test"]
+train_dataset: Dataset = split_dataset["train"]
+eval_dataset: Dataset = split_dataset["test"]
 
 # Load model
-model = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=3)
+model: BertForSequenceClassification = BertForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=3)
 
 # Training arguments
-training_args = TrainingArguments(
+training_args: TrainingArguments = TrainingArguments(
     output_dir="./results",
     num_train_epochs=2,
     per_device_train_batch_size=8,
@@ -68,7 +68,7 @@ training_args = TrainingArguments(
 )
 
 # Trainer
-trainer = Trainer(
+trainer: Trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
