@@ -11,18 +11,63 @@ df: pd.DataFrame = pd.read_csv("C:\\Users\\karti\\Twitter sentiment Analysis\\Bi
 
 # Auto-label if 'label' column not present
 if 'label' not in df.columns:
-    def assign_label(text: Any) -> int:
+    def improved_assign_label(text: Any) -> int:
+        """Enhanced sentiment labeling with more comprehensive keywords"""
         text = str(text).lower()
-        if 'good' in text or 'love' in text or 'great' in text:
+        
+        # Positive indicators
+        positive_words = [
+            'moon', 'bullish', 'pump', 'surge', 'rally', 'gains', 'profit', 'win', 
+            'success', 'boom', 'soar', 'rocket', 'lambo', 'diamond', 'hodl',
+            'good', 'great', 'excellent', 'amazing', 'awesome', 'love', 'like',
+            'up', 'rise', 'increase', 'bull', 'green', 'buy', 'strong'
+        ]
+        
+        # Negative indicators  
+        negative_words = [
+            'crash', 'dump', 'bear', 'bearish', 'drop', 'fall', 'down', 'loss',
+            'terrible', 'awful', 'bad', 'hate', 'fear', 'panic', 'sell', 'red',
+            'dead', 'rip', 'broke', 'bankruptcy', 'scam', 'fraud', 'ponzi'
+        ]
+        
+        # Emojis
+        positive_emojis = ['🚀', '🌙', '💎', '🔥', '💪', '🎉', '📈', '💰', '🤑']
+        negative_emojis = ['😱', '💀', '😭', '📉', '😰', '🤮', '💸', '⚰️']
+        
+        # Count positive and negative indicators
+        pos_score = sum(1 for word in positive_words if word in text)
+        neg_score = sum(1 for word in negative_words if word in text)
+        
+        # Check emojis
+        for emoji in positive_emojis:
+            if emoji in text:
+                pos_score += 1
+        for emoji in negative_emojis:
+            if emoji in text:
+                neg_score += 1
+        
+        # Decision logic
+        if pos_score > neg_score:
             return 1  # Positive
-        elif 'bad' in text or 'hate' in text or 'terrible' in text:
+        elif neg_score > pos_score:
             return 0  # Negative
         else:
             return 2  # Neutral
-    df['label'] = df['text'].apply(assign_label)
+    
+    df['label'] = df['text'].apply(improved_assign_label)
 
 # Only keep required columns
 df = df[['text', 'label']]
+
+# Show label distribution
+print("🏷️  IMPROVED LABEL DISTRIBUTION:")
+label_counts = df['label'].value_counts().sort_index()
+total = len(df)
+for label, count in label_counts.items():
+    sentiment = {0: "NEGATIVE", 1: "POSITIVE", 2: "NEUTRAL"}[label]
+    percentage = (count/total)*100
+    print(f"   {sentiment}: {count} ({percentage:.1f}%)")
+print(f"   Total: {total} tweets\n")
 
 # Tokenizer
 tokenizer: BertTokenizer = BertTokenizer.from_pretrained("bert-base-uncased")

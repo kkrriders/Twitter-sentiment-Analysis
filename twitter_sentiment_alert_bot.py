@@ -1,248 +1,200 @@
-from flask import Flask, request, jsonify
 import os
+import json
 import requests
-import tweepy
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 from dotenv import load_dotenv
-from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple, Union
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+from huggingface_hub import HfApi, HfFolder, Repository
 
-# Load environment variables
+# Load environment variables from .env
 load_dotenv()
 
-app = Flask(__name__)
+# Twitter API credentials
+BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
+API_KEY = os.getenv("TWITTER_API_KEY")
+API_SECRET = os.getenv("TWITTER_API_SECRET")
+ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 
-# Environment validation
-def validate_environment() -> None:
-    """Validate that all required environment variables are set"""
-    required_vars = [
-        'TWITTER_BEARER_TOKEN',
-        'KORE_AI_CLIENT_ID', 
-        'KORE_AI_CLIENT_SECRET',
-        'KORE_AI_BOT_ID'
-    ]
+# Kore.ai credentials
+KORE_BOT_ID = os.getenv("KORE_BOT_ID")
+KORE_CLIENT_ID = os.getenv("KORE_CLIENT_ID")
+KORE_CLIENT_SECRET = os.getenv("KORE_CLIENT_SECRET")
+KORE_API_KEY = os.getenv("KORE_API_KEY")
+KORE_AUTHORIZATION = os.getenv("KORE_AUTHORIZATION")
+
+
+# Hugging Face credentials
+HF_TOKEN = os.getenv("HF_TOKEN")
+HF_REPO_ID = os.getenv("HF_REPO_ID")  
+
+# Authenticate Hugging Face
+if HF_TOKEN:
+    HfFolder.save_token(HF_TOKEN)
+
+
+TWITTER_STREAM_URL = "https://api.twitter.com/2/tweets/search/stream"
+
+
+MODEL_PATH = os.getenv("MODEL_PATH", "./results/checkpoint-87076")
+
+
+if HF_REPO_ID and HF_TOKEN:
+    MODEL_NAME = HF_REPO_ID
+    print(f"[Model] Loading model from HuggingFace Hub: {HF_REPO_ID}")
+    try:
+        
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+        print(f"[Model] ✅ Successfully loaded from HuggingFace Hub")
+    except Exception as e:
+        print(f"[Model] ❌ Failed to load from HuggingFace: {e}")
+        print(f"[Model] 🔄 Falling back to local model: {MODEL_PATH}")
+        MODEL_NAME = MODEL_PATH
+        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased") 
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+else:
+    MODEL_NAME = MODEL_PATH
+    print(f"[Model] Loading model from local path: {MODEL_PATH}")
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased") 
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+
+nlp_pipeline = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
+
+def twitter_headers():
+    return {"Authorization": f"Bearer {BEARER_TOKEN}"}
+
+def process_tweet(text):
+    sentiment = nlp_pipeline(text)[0]
+    raw_label = sentiment["label"]
+    score = sentiment["score"]
     
-    missing_vars: List[str] = []
-    for var in required_vars:
-        if not os.getenv(var):
-            missing_vars.append(var)
-    
-    if missing_vars:
-        print(f"⚠️ Warning: Missing environment variables: {', '.join(missing_vars)}")
-        print("Some features may not work properly.")
-    else:
-        print("✅ All required environment variables are set.")
-
-# Validate environment on startup
-validate_environment()
-
-# === Twitter API Configuration ===
-bearer_token: Optional[str] = os.getenv('TWITTER_BEARER_TOKEN')
-consumer_key: Optional[str] = os.getenv('TWITTER_CONSUMER_KEY')
-consumer_secret: Optional[str] = os.getenv('TWITTER_CONSUMER_SECRET')
-access_token: Optional[str] = os.getenv('TWITTER_ACCESS_TOKEN')
-access_token_secret: Optional[str] = os.getenv('TWITTER_ACCESS_TOKEN_SECRET')
-
-# === Kore.ai Webhook Settings ===
-kore_ai_webhook_url: Optional[str] = os.getenv('KORE_AI_WEBHOOK_URL')
-kore_ai_client_id: Optional[str] = os.getenv('KORE_AI_CLIENT_ID')
-kore_ai_client_secret: Optional[str] = os.getenv('KORE_AI_CLIENT_SECRET')
-kore_ai_bot_id: Optional[str] = os.getenv('KORE_AI_BOT_ID')
-
-# === Load Sentiment Analysis Model ===
-script_dir: str = os.path.dirname(os.path.abspath(__file__))
-default_model_path: str = os.path.join(script_dir, 'results', 'checkpoint-174152')
-model_path: str = os.getenv('MODEL_PATH', default_model_path)
-
-if not os.path.isabs(model_path):
-    model_path = os.path.join(script_dir, model_path)
-
-print(f"🔍 Looking for model at: {model_path}")
-
-try:
-    print(f"🔍 Loading tokenizer from: bert-base-uncased")
-    tokenizer: AutoTokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    print(f"🔍 Loading model from: {model_path}")
-    model: AutoModelForSequenceClassification = AutoModelForSequenceClassification.from_pretrained(model_path)
-    model.eval()
-    print(f"✅ Model loaded successfully from: {model_path}")
-    print(f"✅ Tokenizer loaded from: bert-base-uncased")
-except FileNotFoundError as e:
-    print(f"❌ Model files not found at {model_path}")
-    print(f"Error: {e}")
-    print("Make sure the model checkpoint directory exists and contains required files.")
-    raise
-except Exception as e:
-    print(f"❌ Could not load model from {model_path}")
-    print(f"Error: {e}")
-    print("Check if the model files are compatible and not corrupted.")
-    raise
-
-# === Predict Sentiment Function ===
-def predict_sentiment(text: str) -> str:
-    inputs: Dict[str, Any] = tokenizer(text, return_tensors='pt', truncation=True, padding=True)
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits: torch.Tensor = outputs.logits
-        predicted_class: int = torch.argmax(logits, dim=1).item()
-        labels: List[str] = ['Negative', 'Neutral', 'Positive']
-        return labels[predicted_class]
-
-# === Send Alert to Kore.ai ===
-def send_alert_to_kore(text: str, sentiment: str) -> bool:
-    if not kore_ai_webhook_url or kore_ai_webhook_url == 'https://bots.kore.ai/api/v1.1/public/webhook/xxxxx':
-        print(f"⚠️ Kore.ai not configured. Would send: {sentiment} for tweet: {text[:50]}...")
-        return True
-    
-    # Send message to trigger dialog with context
-    payload: Dict[str, Any] = {
-        "message": {
-            "text": f"New tweet alert: {sentiment} sentiment detected",
-            "type": "text"
-        },
-        "from": {
-            "id": "twitter_bot"
-        },
-        "context": {
-            "tweet_text": text,
-            "sentiment": sentiment,
-            "timestamp": str(datetime.now().isoformat())
-        }
+   
+    label_mapping = {
+        "LABEL_0": "NEGATIVE",
+        "LABEL_1": "POSITIVE", 
+        "LABEL_2": "NEUTRAL"
     }
     
-    try:
-        # Use message API endpoint to send message to bot
-        message_url: str = f"https://bots.kore.ai/api/v1.1/public/{kore_ai_bot_id}/messages"
-        print(f"🔍 Sending to Kore.ai: {payload}")
-        print(f"🔗 URL: {message_url}")
-        response: requests.Response = requests.post(
-            message_url,
-            json=payload,
-            headers={
-                "X-Kore-Client-Id": kore_ai_client_id,
-                "X-Kore-Client-Secret": kore_ai_client_secret,
-                "Content-Type": "application/json"
-            }
-        )
-        print(f"🔍 Kore.ai Response: {response.status_code} - {response.text}")
-        if response.status_code == 200:
-            print(f"✅ Alert sent for tweet: {text[:50]}... | Sentiment: {sentiment}")
-            return True
-        else:
-            print(f"❌ Failed to send alert. Status code: {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ Error sending alert: {e}")
-        return False
+    label = label_mapping.get(raw_label, raw_label)
 
-# === API Routes ===
-@app.route('/health', methods=['GET'])
-def health_check() -> Tuple[Dict[str, Any], int]:
-    return jsonify({"status": "healthy", "model_loaded": True}), 200
+    print(f"[Tweet] {text}")
+    print(f"[Sentiment] {label} ({score:.2f})")
 
-@app.route('/predict', methods=['POST'])
-def predict() -> Tuple[Dict[str, Any], int]:
-    try:
-        data: Optional[Dict[str, Any]] = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-            
-        text: str = data.get('text', '')
-        
-        if not text:
-            return jsonify({"error": "No text provided"}), 400
-        
-        sentiment: str = predict_sentiment(text)
-        return jsonify({
-            "text": text,
-            "sentiment": sentiment,
-            "status": "success"
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+   
+    send_kore_alert(text, label, score)
 
-@app.route('/webhook', methods=['POST'])
-def webhook() -> Tuple[Dict[str, Any], int]:
-    """This is your callback URL endpoint for receiving webhook data"""
-    try:
-        data: Optional[Dict[str, Any]] = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-            
-        print(f"📥 Received webhook data: {data}")
-        
-        # Handle different webhook formats
-        tweets_to_process: List[Dict[str, Any]] = []
-        
-        # Twitter webhook format
-        if 'tweet_create_events' in data:
-            tweets_to_process = data['tweet_create_events']
-        # Direct tweet format
-        elif 'text' in data:
-            tweets_to_process = [data]
-        # BotKit SDK format
-        elif 'message' in data and 'text' in data['message']:
-            tweets_to_process = [{'text': data['message']['text']}]
-        
-        for tweet_data in tweets_to_process:
-            text: str = tweet_data.get('text', '').strip()
-            print(f"📝 Processing tweet: {text}")
-            if text and not text.startswith('RT @'):  # Skip retweets
-                sentiment: str = predict_sentiment(text)
-                print(f"🧠 Sentiment analyzed: {sentiment}")
-                print(f"📤 Calling send_alert_to_kore...")
-                result: bool = send_alert_to_kore(text, sentiment)
-                print(f"📧 Kore.ai call result: {result}")
-                print(f"🎯 Processed: {text[:50]}... | Sentiment: {sentiment}")
-            else:
-                print(f"⏭️ Skipping tweet: {text[:30]}...")
-        
-        return jsonify({"status": "success", "processed": len(tweets_to_process)}), 200
+def send_kore_alert(tweet_text, sentiment_label, sentiment_score):
+    """Send sentiment data to Kore.ai webhook for processing and email sending"""
+    webhook_url = os.getenv("KORE_AI_WEBHOOK_URL")
     
-    except Exception as e:
-        print(f"❌ Error processing webhook: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/analyze_recent', methods=['POST'])
-def analyze_recent_tweets() -> Tuple[Dict[str, Any], int]:
-    try:
-        data: Dict[str, Any] = request.get_json() or {}
-        query: str = data.get('query', 'Bitcoin -is:retweet lang:en')
-        max_results: int = data.get('max_results', 5)
-        
-        client: tweepy.Client = tweepy.Client(bearer_token=bearer_token)
-        response = client.search_recent_tweets(
-            query=query, 
-            tweet_fields=["text", "created_at"], 
-            max_results=max_results
-        )
-        
-        results: List[Dict[str, Any]] = []
-        if response.data:
-            for tweet in response.data:
-                text: str = tweet.text.strip()
-                if text:
-                    sentiment: str = predict_sentiment(text)
-                    send_alert_to_kore(text, sentiment)
-                    results.append({
-                        "text": text,
-                        "sentiment": sentiment,
-                        "created_at": str(tweet.created_at)
-                    })
-        
-        return jsonify({
-            "query": query,
-            "results": results,
-            "count": len(results)
-        }), 200
+    if not webhook_url:
+        print("[Kore.ai] Webhook URL not configured. Skipping alert.")
+        return
     
+    
+    if "your_webhook_id" in webhook_url:
+        print("[Kore.ai] Bot not published yet. Logging sentiment locally.")
+        log_sentiment_locally(tweet_text, sentiment_label, sentiment_score)
+        return
+    
+   
+    emoji = "📊"  
+    if sentiment_label.lower() in ["positive", "very positive"]:
+        emoji = "🚀"
+    elif sentiment_label.lower() in ["negative", "very negative"]:
+        emoji = "🚨"
+    
+    payload = {
+        "tweet_text": tweet_text,
+        "sentiment": sentiment_label,
+        "sentiment_label": sentiment_label,
+        "sentiment_score": sentiment_score,
+        "timestamp": get_current_timestamp(),
+        "emoji": emoji
+    }
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    if KORE_AUTHORIZATION:
+        headers["Authorization"] = KORE_AUTHORIZATION
+    
+    try:
+        response = requests.post(webhook_url, headers=headers, json=payload)
+        print(f"[Kore.ai] {emoji} {sentiment_label.upper()} sentiment sent to webhook. Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"[Kore.ai] Webhook response: {response.text}")
+            
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"[Kore.ai] Error sending to webhook: {e}")
 
-if __name__ == '__main__':
-    port: int = int(os.getenv('PORT', '5000'))
-    print("🚀 Starting Twitter Sentiment Analysis API...")
-    print(f"📍 Webhook URL will be available on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+def log_sentiment_locally(tweet_text, sentiment_label, sentiment_score):
+    """Log sentiment locally while webhook is not available"""
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+   
+    emoji = "🚀" if sentiment_label == "POSITIVE" else "🚨" if sentiment_label == "NEGATIVE" else "📊"
+    print(f"[Local Log] {emoji} {sentiment_label} ({sentiment_score:.2f}) - {tweet_text}")
+    
+ 
+    try:
+        with open("sentiment_alerts.log", "a", encoding="utf-8") as f:
+            f.write(f"{timestamp} | {sentiment_label} | {sentiment_score:.2f} | {tweet_text}\n")
+    except Exception as e:
+        print(f"[Local Log] Error writing to file: {e}")
+
+def get_current_timestamp():
+    """Get current timestamp in readable format"""
+    from datetime import datetime
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+def start_stream():
+    response = requests.get(TWITTER_STREAM_URL, headers=twitter_headers(), stream=True)
+    if response.status_code != 200:
+        raise Exception(f"Error: {response.status_code}, {response.text}")
+
+    for line in response.iter_lines():
+        if line:
+            tweet_data = json.loads(line)
+            tweet_text = tweet_data["data"]["text"]
+            process_tweet(tweet_text)
+
+def push_model_to_huggingface():
+    """
+    Pushes your fine-tuned model to the Hugging Face Hub.
+    """
+    if not HF_TOKEN or not HF_REPO_ID:
+        print("[HF] Missing Hugging Face credentials. Skipping model push.")
+        return
+
+    try:
+        repo = Repository(local_dir="hf_model_repo", clone_from=HF_REPO_ID, use_auth_token=HF_TOKEN)
+        tokenizer.save_pretrained("hf_model_repo")
+        model.save_pretrained("hf_model_repo")
+        repo.push_to_hub(commit_message="Updated sentiment model")
+        print("[HF] Model successfully pushed to Hugging Face Hub")
+    except Exception as e:
+        print(f"[HF] Error pushing model to Hugging Face: {e}")
+
+if __name__ == "__main__":
+    print("[System] Starting Bitcoin Sentiment Analysis Bot...")
+    print(f"[System] Model: {MODEL_NAME}")
+    print(f"[System] Webhook: {os.getenv('KORE_AI_WEBHOOK_URL', 'Not configured')}")
+    
+    try:
+        
+        if HF_TOKEN and HF_REPO_ID:
+            push_model_to_huggingface()
+
+        
+        print("[System] Starting Twitter stream monitoring...")
+        start_stream()
+
+    except KeyboardInterrupt:
+        print("[System] Bot stopped by user.")
+    except Exception as e:
+        print(f"[Error] {e}")

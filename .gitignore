@@ -47,6 +47,12 @@ twitter_test.json
 
 # Large data files (exceed GitHub's 100MB limit)
 Bitcoin_tweets_after_june_2022.csv
-# Keep the latest model for deployment
-# results/checkpoint-174152/pytorch_model.bin
-results/checkpoint-87076/pytorch_model.bin
+
+# Model files (use HuggingFace Hub instead)
+sentiment_model/
+results/
+training_plots/
+
+# Screenshots and temporary files
+Screenshot*.png
+*.png

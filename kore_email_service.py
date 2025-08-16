@@ -1,74 +1,139 @@
-from flask import Flask, request, jsonify
+import os
 import smtplib
+import json
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import os
 from dotenv import load_dotenv
-from typing import Dict, Any, Tuple
+from typing import Optional, Dict, Any
 
 load_dotenv()
 
-app = Flask(__name__)
-
-@app.route('/send-email', methods=['POST'])
-def send_email() -> Tuple[Dict[str, Any], int]:
-    try:
-        data: Optional[Dict[str, Any]] = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "No JSON data provided"}), 400
+class KoreEmailService:
+    def __init__(self):
+        self.smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        self.sender_email = os.getenv("SENDER_EMAIL")
+        self.sender_password = os.getenv("SENDER_PASSWORD")
+        self.recipient_email = os.getenv("RECIPIENT_EMAIL")
+        self.kore_webhook_url = os.getenv("KORE_AI_WEBHOOK_URL")
+        self.kore_authorization = os.getenv("KORE_AUTHORIZATION")
         
-        # Extract email parameters
-        to_email: Optional[str] = data.get('to_email')
-        subject: str = data.get('subject', 'Sentiment Analysis Alert')
-        tweet_text: str = data.get('tweet_text', '')
-        sentiment: str = data.get('sentiment', '')
-        
-        # Email content
-        body: str = f"""
-        Sentiment Analysis Alert
-        
-        Tweet: {tweet_text}
-        Sentiment: {sentiment}
-        Timestamp: {data.get('timestamp', 'Not provided')}
-        
-        This is an automated alert from your Twitter Sentiment Analysis Bot.
+        if not all([self.sender_email, self.sender_password, self.recipient_email]):
+            raise ValueError("Missing required email configuration. Check SENDER_EMAIL, SENDER_PASSWORD, and RECIPIENT_EMAIL environment variables.")
+    
+    def send_email_via_smtp(self, subject: str, content: str, recipient: Optional[str] = None) -> Dict[str, Any]:
         """
+        Send email using SMTP (Gmail)
+        """
+        to_email = recipient or self.recipient_email
         
-        # Email configuration
-        smtp_server: str = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-        smtp_port: int = int(os.getenv('SMTP_PORT', '587'))
-        sender_email: Optional[str] = os.getenv('SENDER_EMAIL')
-        sender_password: Optional[str] = os.getenv('SENDER_PASSWORD')
+        try:
+            # Create message
+            msg = MIMEMultipart()
+            msg['From'] = self.sender_email
+            msg['To'] = to_email
+            msg['Subject'] = subject
+            
+            # Add body to email
+            msg.attach(MIMEText(content, 'plain'))
+            
+            # Create SMTP session
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.starttls()  # Enable security
+            server.login(self.sender_email, self.sender_password)
+            
+            # Send email
+            text = msg.as_string()
+            server.sendmail(self.sender_email, to_email, text)
+            server.quit()
+            
+            return {
+                "success": True,
+                "status_code": 200,
+                "response": "Email sent successfully via SMTP"
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def send_email_via_kore_webhook(self, subject: str, content: str, recipient: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Send email through Kore.ai webhook that triggers SMTP
+        """
+        if not self.kore_webhook_url:
+            return self.send_email_via_smtp(subject, content, recipient)
         
-        # Create message
-        message: MIMEMultipart = MIMEMultipart()
-        message["From"] = sender_email
-        message["To"] = to_email
-        message["Subject"] = subject
-        message.attach(MIMEText(body, "plain"))
+        to_email = recipient or self.recipient_email
         
-        # Send email
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, to_email, message.as_string())
+        payload = {
+            "action": "send_email",
+            "email_data": {
+                "to": to_email,
+                "subject": subject,
+                "content": content,
+                "from": self.sender_email
+            }
+        }
         
-        return jsonify({
-            "status": "success",
-            "message": "Email sent successfully",
-            "to": to_email,
-            "sentiment": sentiment
-        }), 200
+        headers = {
+            "Content-Type": "application/json"
+        }
         
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        if self.kore_authorization:
+            headers["Authorization"] = self.kore_authorization
+        
+        try:
+            response = requests.post(self.kore_webhook_url, headers=headers, json=payload)
+            return {
+                "success": response.status_code in [200, 202],
+                "status_code": response.status_code,
+                "response": response.text
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def send_sentiment_alert(self, tweet_text: str, sentiment_label: str, sentiment_score: float, recipient: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Send sentiment alert email with formatted content
+        """
+        subject = f"🚨 Negative Sentiment Alert - {sentiment_label.title()}"
+        
+        content = f"""
+TWITTER SENTIMENT ALERT
 
-@app.route('/health', methods=['GET'])
-def health_check() -> Dict[str, str]:
-    return jsonify({"status": "healthy", "service": "email"})
+Sentiment: {sentiment_label.upper()} (Confidence: {sentiment_score:.2%})
+Tweet: {tweet_text}
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+Timestamp: {self._get_current_timestamp()}
+
+This alert was generated by your Twitter Sentiment Analysis system.
+        """.strip()
+        
+        # Try Kore.ai webhook first, fallback to direct SMTP
+        result = self.send_email_via_kore_webhook(subject, content, recipient)
+        
+        if not result.get("success"):
+            print(f"[Email] Kore.ai webhook failed, trying direct SMTP: {result.get('error', 'Unknown error')}")
+            result = self.send_email_via_smtp(subject, content, recipient)
+        
+        return result
+    
+    def _get_current_timestamp(self) -> str:
+        """Get current timestamp in readable format"""
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+# Convenience function for easy import
+def send_sentiment_alert(tweet_text: str, sentiment_label: str, sentiment_score: float, recipient: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Convenience function to send sentiment alert
+    """
+    email_service = KoreEmailService()
+    return email_service.send_sentiment_alert(tweet_text, sentiment_label, sentiment_score, recipient)
