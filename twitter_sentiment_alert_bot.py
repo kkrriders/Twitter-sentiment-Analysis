@@ -33,7 +33,7 @@ if HF_TOKEN:
     HfFolder.save_token(HF_TOKEN)
 
 
-TWITTER_STREAM_URL = "https://api.twitter.com/2/tweets/search/stream"
+TWITTER_SEARCH_URL = "https://api.twitter.com/2/tweets/search/recent"
 
 
 MODEL_PATH = os.getenv("MODEL_PATH", "./results/checkpoint-87076")
@@ -152,16 +152,70 @@ def get_current_timestamp():
     from datetime import datetime
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
 
-def start_stream():
-    response = requests.get(TWITTER_STREAM_URL, headers=twitter_headers(), stream=True)
-    if response.status_code != 200:
-        raise Exception(f"Error: {response.status_code}, {response.text}")
+def search_bitcoin_tweets():
+    """Search for recent Bitcoin tweets using Twitter API v2"""
+    query = "bitcoin OR btc OR #bitcoin OR #btc -is:retweet lang:en"
+    params = {
+        "query": query,
+        "max_results": 10,  # Stay within free tier limits
+        "tweet.fields": "created_at,public_metrics"
+    }
+    
+    try:
+        response = requests.get(TWITTER_SEARCH_URL, headers=twitter_headers(), params=params)
+        if response.status_code != 200:
+            print(f"[Twitter] Error searching tweets: {response.status_code} - {response.text}")
+            return []
+        
+        data = response.json()
+        if "data" in data:
+            print(f"[Twitter] Found {len(data['data'])} Bitcoin tweets")
+            return data["data"]
+        else:
+            print("[Twitter] No tweets found")
+            return []
+            
+    except Exception as e:
+        print(f"[Twitter] Search error: {e}")
+        return []
 
-    for line in response.iter_lines():
-        if line:
-            tweet_data = json.loads(line)
-            tweet_text = tweet_data["data"]["text"]
-            process_tweet(tweet_text)
+def start_periodic_search():
+    """Run periodic Twitter search for Bitcoin tweets"""
+    import time
+    
+    print("[System] Starting periodic Bitcoin tweet search...")
+    print("[System] Searching every 30 minutes to stay within API limits")
+    
+    # Track processed tweets to avoid duplicates
+    processed_tweets = set()
+    
+    while True:
+        try:
+            tweets = search_bitcoin_tweets()
+            
+            for tweet in tweets:
+                tweet_id = tweet["id"]
+                if tweet_id not in processed_tweets:
+                    tweet_text = tweet["text"]
+                    print(f"[New Tweet] Processing: {tweet_text[:100]}...")
+                    process_tweet(tweet_text)
+                    processed_tweets.add(tweet_id)
+                    
+                    # Keep only last 1000 processed IDs to manage memory
+                    if len(processed_tweets) > 1000:
+                        processed_tweets = set(list(processed_tweets)[-500:])
+            
+            # Wait 30 minutes between searches (Free tier: ~3 searches/day)
+            print("[System] Waiting 30 minutes before next search...")
+            time.sleep(1800)  # 30 minutes
+            
+        except KeyboardInterrupt:
+            print("[System] Search stopped by user")
+            break
+        except Exception as e:
+            print(f"[Error] Search error: {e}")
+            print("[System] Retrying in 5 minutes...")
+            time.sleep(300)  # Wait 5 minutes on error
 
 def push_model_to_huggingface():
     """
@@ -191,8 +245,8 @@ if __name__ == "__main__":
             push_model_to_huggingface()
 
         
-        print("[System] Starting Twitter stream monitoring...")
-        start_stream()
+        print("[System] Starting periodic Twitter search...")
+        start_periodic_search()
 
     except KeyboardInterrupt:
         print("[System] Bot stopped by user.")

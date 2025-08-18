@@ -23,10 +23,10 @@ def run_bot():
     """Run the Twitter bot in a separate thread"""
     try:
         # Import here to avoid loading models on startup
-        from twitter_sentiment_alert_bot import start_stream, MODEL_NAME
+        from twitter_sentiment_alert_bot import start_periodic_search, MODEL_NAME
         bot_status["model"] = MODEL_NAME
         bot_status["status"] = "running"
-        start_stream()
+        start_periodic_search()
     except Exception as e:
         bot_status["status"] = f"error: {str(e)}"
         print(f"Bot error: {e}")
