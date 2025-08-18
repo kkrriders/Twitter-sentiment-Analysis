@@ -1,1 +1,1 @@
-web: gunicorn --bind 0.0.0.0:$PORT --timeout 120 --workers 1 twitter_sentiment_alert_bot:app
+web: gunicorn --bind 0.0.0.0:$PORT --timeout 120 --workers 1 app:app
