@@ -21,37 +21,26 @@ def health():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Webhook endpoint for Kore.ai to send email alerts"""
+    """Webhook endpoint for Kore.ai to receive sentiment data"""
     from flask import request
-    from kore_email_service import send_sentiment_alert
     
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
-        # Extract email data from Kore.ai request
-        email_data = data.get('email_data', {})
+        # Log the received data for debugging
+        print(f"Webhook received: {data}")
         
-        # Test email sending
-        if data.get('action') == 'send_email':
-            subject = email_data.get('subject', 'Test Email')
-            content = email_data.get('content', 'Test message from Kore.ai webhook')
-            recipient = email_data.get('to')
-            
-            # Use the email service directly
-            from kore_email_service import KoreEmailService
-            email_service = KoreEmailService()
-            result = email_service.send_email_via_smtp(subject, content, recipient)
-            
-            return jsonify({
-                "status": "success" if result.get("success") else "error",
-                "result": result
-            })
-        
-        return jsonify({"error": "Invalid action"}), 400
+        # Just acknowledge receipt - Kore.ai will handle email sending
+        return jsonify({
+            "status": "success",
+            "message": "Data received successfully",
+            "received_data": data
+        })
         
     except Exception as e:
+        print(f"Webhook error: {e}")
         return jsonify({"error": str(e)}), 500
 
 def run_bot():
